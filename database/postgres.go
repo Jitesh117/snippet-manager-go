@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,6 +118,7 @@ func (s *PostgresStorage) Create(snippet models.Snippet) error {
 func (s *PostgresStorage) Update(snippet models.Snippet) error {
 	tx, err := s.db.Begin()
 	if err != nil {
+		log.Printf("Error beginning transaction: %v", err)
 		return err
 	}
 	defer tx.Rollback()
@@ -133,23 +135,60 @@ func (s *PostgresStorage) Update(snippet models.Snippet) error {
 		snippet.UpdatedAt,
 	)
 	if err != nil {
+		log.Printf("Error updating snippet: %v", err)
 		return err
 	}
+
+	log.Println("Snippet updated successfully")
 
 	// Remove existing tags
 	_, err = tx.Exec("DELETE FROM snippet_tags WHERE snippet_id = $1", snippet.ID)
 	if err != nil {
+		log.Printf("Error deleting snippet tags: %v", err)
 		return err
 	}
 
+	log.Println("Snippet tags deleted successfully")
+
 	// Add new tags
 	for _, tag := range snippet.Tags {
-		if err := s.AddTag(snippet.ID, tag); err != nil {
+		var tagID uuid.UUID
+		err := tx.QueryRow("SELECT id FROM tags WHERE name = $1", tag).Scan(&tagID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// Tag does not exist, create it
+				tagID = uuid.New()
+				_, err := tx.Exec("INSERT INTO tags (id, name) VALUES ($1, $2)", tagID, tag)
+				if err != nil {
+					log.Printf("Error creating tag %s: %v", tag, err)
+					return err
+				}
+			} else {
+				log.Printf("Error querying tag %s: %v", tag, err)
+				return err
+			}
+		}
+
+		_, err = tx.Exec(
+			"INSERT INTO snippet_tags (snippet_id, tag_id) VALUES ($1, $2)",
+			snippet.ID,
+			tagID,
+		)
+		if err != nil {
+			log.Printf("Error adding tag %s to snippet %v: %v", tag, snippet.ID, err)
 			return err
 		}
+		log.Printf("Tag %s added successfully", tag)
 	}
 
-	return tx.Commit()
+	err = tx.Commit()
+	if err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		return err
+	}
+
+	log.Println("Transaction committed successfully")
+	return nil
 }
 
 func (s *PostgresStorage) GetAll() ([]models.Snippet, error) {
@@ -267,6 +306,32 @@ func (s *PostgresStorage) CreateFolder(folder models.Folder) error {
 		folder.UpdatedAt,
 	)
 	return err
+}
+
+func (s *PostgresStorage) GetFoldersByUser(userID uuid.UUID) ([]models.Folder, error) {
+	rows, err := s.db.Query(
+		"SELECT id, name, user_id, parent_id, created_at, updated_at FROM folders WHERE user_id = $1",
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var folders []models.Folder
+	for rows.Next() {
+		var folder models.Folder
+		if err := rows.Scan(&folder.ID, &folder.Name, &folder.UserID, &folder.ParentID, &folder.CreatedAt, &folder.UpdatedAt); err != nil {
+			return nil, err
+		}
+		folders = append(folders, folder)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return folders, nil
 }
 
 func (s *PostgresStorage) GetFolderContents(

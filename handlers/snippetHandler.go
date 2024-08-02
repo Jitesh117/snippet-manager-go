@@ -189,6 +189,24 @@ func (h *SnippetHandler) HandleFolders(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *SnippetHandler) HandleUserFolders(w http.ResponseWriter, r *http.Request) {
+	userIDStr := strings.TrimPrefix(r.URL.Path, "/folders/user/")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	folders, err := h.storage.GetFoldersByUser(userID)
+	if err != nil {
+		http.Error(w, "Failed to retrieve folders: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(folders)
+}
+
 func (h *SnippetHandler) createFolder(w http.ResponseWriter, r *http.Request) {
 	var folder models.Folder
 	err := json.NewDecoder(r.Body).Decode(&folder)

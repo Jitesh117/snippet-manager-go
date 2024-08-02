@@ -31,6 +31,8 @@ func main() {
 	http.HandleFunc("/snippets/", snippetHandler.HandleSnippet)
 	http.HandleFunc("/snippets", snippetHandler.HandleSnippets)
 	http.HandleFunc("/tags/", snippetHandler.HandleTags)
+	http.HandleFunc("/folders", snippetHandler.HandleFolders)
+	http.HandleFunc("/folders/user/", snippetHandler.HandleUserFolders)
 
 	fmt.Println("Server starting on port 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
