@@ -31,7 +31,7 @@ func (h *SnippetHandler) HandleSnippets(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *SnippetHandler) HandleSnippet(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/snippets")
+	idStr := strings.TrimPrefix(r.URL.Path, "/snippets/")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		http.Error(w, "Invalid snippet ID", http.StatusBadRequest)
@@ -39,7 +39,7 @@ func (h *SnippetHandler) HandleSnippet(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		h.GetSnippet(w, r, id)
+		h.getSnippet(w, r, id)
 	case http.MethodPut:
 		h.updateSnippet(w, r, id)
 	case http.MethodDelete:
@@ -81,13 +81,11 @@ func (h *SnippetHandler) createSnippet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snippet.ID = uuid.New()
-
 	err = h.storage.Create(snippet)
 	if err != nil {
 		http.Error(w, "Failed to create snippet: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(snippet)
@@ -119,8 +117,118 @@ func (h *SnippetHandler) deleteSnippet(w http.ResponseWriter, r *http.Request, i
 	if err != nil {
 		if err.Error() == "snippet not found" {
 			http.Error(w, "Snippet not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to delete snippet: "+err.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// New handlers for tag and folder operations
+
+func (h *SnippetHandler) HandleTags(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
+	}
+	snippetID, err := uuid.Parse(parts[2])
+	if err != nil {
+		http.Error(w, "Invalid snippet ID", http.StatusBadRequest)
+		return
+	}
+	tagName := parts[3]
+
+	switch r.Method {
+	case http.MethodPost:
+		h.addTag(w, r, snippetID, tagName)
+	case http.MethodDelete:
+		h.removeTag(w, r, snippetID, tagName)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *SnippetHandler) addTag(
+	w http.ResponseWriter,
+	r *http.Request,
+	snippetID uuid.UUID,
+	tagName string,
+) {
+	err := h.storage.AddTag(snippetID, tagName)
+	if err != nil {
+		http.Error(w, "Failed to add tag: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (h *SnippetHandler) removeTag(
+	w http.ResponseWriter,
+	r *http.Request,
+	snippetID uuid.UUID,
+	tagName string,
+) {
+	err := h.storage.RemoveTag(snippetID, tagName)
+	if err != nil {
+		http.Error(w, "Failed to remove tag: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *SnippetHandler) HandleFolders(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		h.createFolder(w, r)
+	case http.MethodGet:
+		h.getFolderContents(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *SnippetHandler) createFolder(w http.ResponseWriter, r *http.Request) {
+	var folder models.Folder
+	err := json.NewDecoder(r.Body).Decode(&folder)
+	if err != nil {
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	folder.ID = uuid.New()
+	err = h.storage.CreateFolder(folder)
+	if err != nil {
+		http.Error(w, "Failed to create folder: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(folder)
+}
+
+func (h *SnippetHandler) getFolderContents(w http.ResponseWriter, r *http.Request) {
+	folderIDStr := r.URL.Query().Get("id")
+	folderID, err := uuid.Parse(folderIDStr)
+	if err != nil {
+		http.Error(w, "Invalid folder ID", http.StatusBadRequest)
+		return
+	}
+
+	snippets, folders, err := h.storage.GetFolderContents(folderID)
+	if err != nil {
+		http.Error(w, "Failed to get folder contents: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response := struct {
+		Snippets []models.Snippet `json:"snippets"`
+		Folders  []models.Folder  `json:"folders"`
+	}{
+		Snippets: snippets,
+		Folders:  folders,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
