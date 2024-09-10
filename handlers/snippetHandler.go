@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	database "snippet-manager-go/database"
 	"snippet-manager-go/models"
@@ -13,6 +15,72 @@ import (
 
 type SnippetHandler struct {
 	storage *database.PostgresStorage
+}
+
+type UserHandler struct {
+	storage *database.PostgresStorage
+}
+
+func NewUserHandler(storage *database.PostgresStorage) *UserHandler {
+	return &UserHandler{storage: storage}
+}
+
+func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var user models.User
+	err := json.NewDecoder(r.Body).Decode(&user)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	// TODO: Add input validation here
+
+	err = h.storage.CreateUser(&user)
+	if err != nil {
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
+	}
+
+	user.Password = "" // Clear password before sending response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
+}
+
+func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var credentials struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+
+	err := json.NewDecoder(r.Body).Decode(&credentials)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.storage.GetUserByUsername(credentials.Username)
+	if err != nil {
+		http.Error(w, "Invalid username", http.StatusUnauthorized)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(credentials.Password))
+	if err != nil {
+		log.Printf("Password comparison failed: %v", err)
+		http.Error(w, "Invalid password", http.StatusUnauthorized)
+		return
+	}
+
+	// TODO: Generate and return JWT token here
+
+	// Clear password before sending response
+	user.Password = ""
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(user); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 func NewSnippetHandler(storage *database.PostgresStorage) *SnippetHandler {
@@ -81,6 +149,10 @@ func (h *SnippetHandler) createSnippet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snippet.ID = uuid.New()
+	if snippet.Code == "" {
+		http.Error(w, "Code cannot be empty", http.StatusBadRequest)
+		return
+	}
 	err = h.storage.Create(snippet)
 	if err != nil {
 		http.Error(w, "Failed to create snippet: "+err.Error(), http.StatusInternalServerError)
@@ -96,6 +168,10 @@ func (h *SnippetHandler) updateSnippet(w http.ResponseWriter, r *http.Request, i
 	err := json.NewDecoder(r.Body).Decode(&snippet)
 	if err != nil {
 		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if snippet.Code == "" {
+		http.Error(w, "Code cannot be empty", http.StatusBadRequest)
 		return
 	}
 	snippet.ID = id

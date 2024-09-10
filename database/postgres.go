@@ -2,12 +2,14 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 
 	"snippet-manager-go/models"
 )
@@ -31,6 +33,14 @@ func NewPostgresStorage(host, port, user, password, dbname string) (*PostgresSto
 
 func (s *PostgresStorage) Init() error {
 	_, err := s.db.Exec(`
+    CREATE TABLE IF NOT EXISTS users (
+            id UUID PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
     CREATE TABLE IF NOT EXISTS snippets (
         id UUID PRIMARY KEY,
         title TEXT NOT NULL,
@@ -64,6 +74,54 @@ func (s *PostgresStorage) Init() error {
     );
     `)
 	return err
+}
+
+func (s *PostgresStorage) CreateUser(user *models.User) error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	user.ID = uuid.New()
+	user.CreatedAt = time.Now()
+	user.UpdatedAt = time.Now()
+
+	_, err = s.db.Exec(
+		"INSERT INTO users (id, username, email, password, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
+		user.ID,
+		user.Username,
+		user.Email,
+		hashedPassword,
+		user.CreatedAt,
+		user.UpdatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStorage) GetUserByUsername(username string) (*models.User, error) {
+	user := &models.User{}
+	err := s.db.QueryRow(
+		"SELECT id, username, email, password, created_at, updated_at FROM users WHERE username = $1",
+		username,
+	).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.CreatedAt, &user.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, errors.New("user not found")
+	}
+	return user, err
+}
+
+func (s *PostgresStorage) GetUserByID(id uuid.UUID) (*models.User, error) {
+	user := &models.User{}
+	err := s.db.QueryRow(
+		"SELECT id, username, email, created_at, updated_at FROM users WHERE id = $1",
+		id,
+	).Scan(&user.ID, &user.Username, &user.Email, &user.CreatedAt, &user.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, errors.New("user not found")
+	}
+	return user, err
 }
 
 func (s *PostgresStorage) Create(snippet models.Snippet) error {

@@ -27,12 +27,15 @@ func main() {
 	}
 
 	snippetHandler := handlers.NewSnippetHandler(store)
+	userHandler := handlers.NewUserHandler(store)
 
 	http.HandleFunc("/snippets/", snippetHandler.HandleSnippet)
 	http.HandleFunc("/snippets", snippetHandler.HandleSnippets)
 	http.HandleFunc("/tags/", snippetHandler.HandleTags)
 	http.HandleFunc("/folders", snippetHandler.HandleFolders)
 	http.HandleFunc("/folders/user/", snippetHandler.HandleUserFolders)
+	http.HandleFunc("/register", userHandler.Register)
+	http.HandleFunc("/login", userHandler.Login)
 
 	fmt.Println("Server starting on port 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
