@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
@@ -20,6 +23,13 @@ type SnippetHandler struct {
 type UserHandler struct {
 	storage *database.PostgresStorage
 }
+
+type Claims struct {
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
+
+var jwtKey = []byte("my_secret_key") // secret key for signing the JWT
 
 func NewUserHandler(storage *database.PostgresStorage) *UserHandler {
 	return &UserHandler{storage: storage}
@@ -72,12 +82,28 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Generate and return JWT token here
+	expirationTime := time.Now().Add(24 * time.Hour) // token valid for 24 hours
+	claims := &Claims{
+		Username: credentials.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
+		},
+	}
+	// Create token with claims
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(jwtKey)
+	if err != nil {
+		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		return
+	}
 
+	// Send token to client
 	// Clear password before sending response
 	user.Password = ""
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+
 	if err := json.NewEncoder(w).Encode(user); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
@@ -148,6 +174,10 @@ func (h *SnippetHandler) createSnippet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err = validateSnippet(&snippet); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	snippet.ID = uuid.New()
 	if snippet.Code == "" {
 		http.Error(w, "Code cannot be empty", http.StatusBadRequest)
@@ -170,8 +200,8 @@ func (h *SnippetHandler) updateSnippet(w http.ResponseWriter, r *http.Request, i
 		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if snippet.Code == "" {
-		http.Error(w, "Code cannot be empty", http.StatusBadRequest)
+	if err = validateSnippet(&snippet); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	snippet.ID = id
@@ -325,4 +355,31 @@ func (h *SnippetHandler) getFolderContents(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+func validateSnippet(s *models.Snippet) error {
+	if strings.TrimSpace(s.Title) == "" {
+		return errors.New("title cannot be empty")
+	}
+	if len(s.Title) > 100 {
+		return errors.New("title cannot exceed 100 characters")
+	}
+	if strings.TrimSpace(s.Code) == "" {
+		return errors.New("code cannot be empty")
+	}
+	if len(s.Code) > 10000 {
+		return errors.New("code cannot exceed 10000 characters")
+	}
+	if strings.TrimSpace(s.Language) == "" {
+		return errors.New("language cannot be empty")
+	}
+	for _, tag := range s.Tags {
+		if strings.TrimSpace(tag) == "" {
+			return errors.New("tags cannot be empty")
+		}
+		if len(tag) > 50 {
+			return errors.New("tag cannot exceed 50 characters")
+		}
+	}
+	return nil
 }

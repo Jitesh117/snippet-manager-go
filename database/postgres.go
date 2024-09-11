@@ -47,7 +47,7 @@ func (s *PostgresStorage) Init() error {
         description TEXT,
         language TEXT NOT NULL,
         code TEXT NOT NULL,
-        user_id UUID NOT NULL,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         folder_id UUID,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -68,7 +68,7 @@ func (s *PostgresStorage) Init() error {
         id UUID PRIMARY KEY,
         name TEXT NOT NULL,
         parent_id UUID REFERENCES folders(id) ON DELETE CASCADE,
-        user_id UUID NOT NULL,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
